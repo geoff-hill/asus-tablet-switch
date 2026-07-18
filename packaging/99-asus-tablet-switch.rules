@@ -1,0 +1,5 @@
+# Grant only the daemon's private group access to the named ASUS event source.
+SUBSYSTEM=="input", KERNEL=="event*", ATTRS{name}=="Asus WMI hotkeys", GROUP="asus-tablet-switch", MODE="0660"
+
+# uinput is needed read/write to create and emit through the virtual switch.
+KERNEL=="uinput", SUBSYSTEM=="misc", GROUP="asus-tablet-switch", MODE="0660"

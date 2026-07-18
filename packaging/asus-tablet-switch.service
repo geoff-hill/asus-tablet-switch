@@ -1,0 +1,43 @@
+[Unit]
+Description=ASUS hinge to tablet-mode switch translator
+After=systemd-udevd.service
+
+[Service]
+Type=simple
+User=asus-tablet-switch
+Group=asus-tablet-switch
+ExecStart=/usr/local/sbin/asus-tablet-switch
+Restart=on-failure
+RestartSec=2s
+
+# DevicePolicy limits the device cgroup; udev ownership limits which event node is openable.
+DevicePolicy=closed
+DeviceAllow=char-input r
+DeviceAllow=/dev/uinput rw
+PrivateDevices=no
+
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+PrivateTmp=yes
+PrivateNetwork=yes
+IPAddressDeny=any
+ProtectSystem=strict
+ProtectHome=yes
+ProtectControlGroups=yes
+ProtectKernelLogs=yes
+ProtectKernelModules=yes
+ProtectKernelTunables=yes
+ProtectClock=yes
+ProtectHostname=yes
+ProtectProc=invisible
+ProcSubset=pid
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

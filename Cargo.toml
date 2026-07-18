@@ -2,5 +2,10 @@
 name = "asus-tablet-switch"
 version = "0.1.0"
 edition = "2024"
+description = "Translate ASUS hinge hotkeys into a virtual tablet-mode switch"
+license = "MIT"
+rust-version = "1.85"
 
 [dependencies]
+evdev = "0.13.2"
+signal-hook = { version = "0.4.4", default-features = false }

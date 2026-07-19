@@ -116,14 +116,37 @@ builder can resolve them. Skipping the local RPM dependency preflight does not
 skip the compile or test phases.
 
 Packages are written below `target/rpmbuild/RPMS` and
-`target/rpmbuild/SRPMS`. Install the architecture-specific RPM, then explicitly
-enable the daemon only after the manual test has passed:
+`target/rpmbuild/SRPMS`. Install the architecture-specific RPM without enabling
+the daemon yet:
 
 ```console
 sudo dnf install ./target/rpmbuild/RPMS/*/asus-tablet-switch-*.rpm
-sudo systemctl enable --now asus-tablet-switch.service
+```
+
+Test the installed service for the current session without enabling it at boot:
+
+```console
+sudo systemctl start asus-tablet-switch.service
 sudo systemctl status asus-tablet-switch.service
 sudo journalctl -b -u asus-tablet-switch.service
+```
+
+Repeat the fold, unfold, and full lid-close/open checks from
+[Manual test before installation](#manual-test-before-installation), watching
+the service journal instead of terminal A. When testing is finished, stop it:
+
+```console
+sudo systemctl stop asus-tablet-switch.service
+```
+
+If the internal keyboard and touchpad become stuck off, fully close and reopen
+the lid. If that does not recover them, use an external keyboard to stop the
+service. As a last resort, reboot; because the service has not yet been enabled,
+it will not start automatically. Only after the complete test succeeds, enable
+and start it persistently:
+
+```console
+sudo systemctl enable --now asus-tablet-switch.service
 ```
 
 The RPM creates the static service account through systemd-sysusers, installs

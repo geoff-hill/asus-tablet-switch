@@ -50,6 +50,25 @@ cargo test --release --frozen
 /usr/bin/udevadm control --reload-rules >/dev/null 2>&1 || :
 /usr/bin/udevadm trigger --subsystem-match=input --action=change >/dev/null 2>&1 || :
 /usr/bin/udevadm trigger --subsystem-match=misc --action=change >/dev/null 2>&1 || :
+if [ "$1" -eq 1 ]; then
+    printf '%s\n' \
+        '' \
+        'asus-tablet-switch has been installed but not deliberately enabled.' \
+        'Before enabling it, read the test, shutdown, and recovery instructions:' \
+        '' \
+        '  /usr/share/doc/asus-tablet-switch/README.md' \
+        '  /usr/share/doc/asus-tablet-switch/diagnosis.md' \
+        '  man 8 asus-tablet-switch' \
+        '' \
+        'For a non-persistent test, start and later stop it with:' \
+        '' \
+        '  sudo systemctl start asus-tablet-switch.service' \
+        '  sudo systemctl stop asus-tablet-switch.service' \
+        '' \
+        'If internal input becomes stuck off, fully close and reopen the lid.' \
+        'After testing succeeds, enable it as documented in the README.' \
+        ''
+fi
 
 %preun
 %systemd_preun asus-tablet-switch.service

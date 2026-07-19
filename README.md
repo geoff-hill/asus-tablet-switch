@@ -1,5 +1,13 @@
 # ASUS tablet switch daemon
 
+**WARNING: not working at the moment, especially if you have suspend on lid-close. 
+The transition of lid close-open is supposed to reset everything to laptop mode, 
+but it seems if it suspends then the transition is missed due to the events being
+sent before everything is restarted properly.
+
+Do not use unless you want to spend some time troubleshooting.
+---
+
 `asus-tablet-switch` is a small, hardware-specific Linux compatibility daemon
 for the ASUS ProArt PX13 HN7306EAC. It translates the observed ASUS hinge
 hotkey burst into a virtual `SW_TABLET_MODE` switch so GNOME can disable the

@@ -8,6 +8,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 const SOURCE_DEVICE_NAME: &str = "Asus WMI hotkeys";
+const LID_DEVICE_NAME: &str = "Lid Switch";
 const VIRTUAL_DEVICE_NAME: &str = "ASUS Virtual Tablet Mode Switch";
 const DEBOUNCE_INTERVAL: Duration = Duration::from_millis(750);
 const POLL_INTERVAL: Duration = Duration::from_millis(50);
@@ -68,6 +69,13 @@ impl TransitionFilter {
         self.last_transition = Some(now);
         FilterResult::Transition(self.mode)
     }
+
+    fn recover_laptop_mode(&mut self) -> bool {
+        let changed = self.mode != Mode::Laptop;
+        self.mode = Mode::Laptop;
+        self.last_transition = None;
+        changed
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -81,6 +89,13 @@ fn is_prog2_press(event: &evdev::InputEvent) -> bool {
     matches!(
         event.destructure(),
         EventSummary::Key(_, KeyCode::KEY_PROG2, 1)
+    )
+}
+
+fn is_lid_open(event: &evdev::InputEvent) -> bool {
+    matches!(
+        event.destructure(),
+        EventSummary::Switch(_, SwitchCode::SW_LID, 0)
     )
 }
 
@@ -98,9 +113,9 @@ fn emit_mode(device: &mut VirtualDevice, mode: Mode) -> io::Result<()> {
     device.emit(&[SwitchEvent::new(SwitchCode::SW_TABLET_MODE, mode.switch_value()).into()])
 }
 
-fn discover_source() -> Option<(std::path::PathBuf, Device)> {
+fn discover_device(name: &str) -> Option<(std::path::PathBuf, Device)> {
     for (path, device) in evdev::enumerate() {
-        if device.name() == Some(SOURCE_DEVICE_NAME) {
+        if device.name() == Some(name) {
             return Some((path, device));
         }
     }
@@ -123,8 +138,8 @@ fn run(terminate: Arc<AtomicBool>) -> io::Result<()> {
 
     let mut virtual_device = create_virtual_device()?;
 
-    // Deliberate initial-state policy: there is no absolute hinge state to query, so assume laptop.
-    // Keeping this in one place makes a future state-recovery strategy straightforward to add.
+    // There is no absolute hinge state to query at startup, so assume laptop. A later lid-open
+    // event provides an absolute recovery point if hinge-event parity becomes incorrect.
     let initial_mode = Mode::Laptop;
     let mut filter = TransitionFilter::new(initial_mode, DEBOUNCE_INTERVAL);
     emit_mode(&mut virtual_device, initial_mode)?;
@@ -134,7 +149,7 @@ fn run(terminate: Arc<AtomicBool>) -> io::Result<()> {
     let mut retry_delay = RETRY_MIN;
 
     while !terminate.load(Ordering::Relaxed) {
-        let Some((path, mut source)) = discover_source() else {
+        let Some((path, mut source)) = discover_device(SOURCE_DEVICE_NAME) else {
             eprintln!(
                 "source device {SOURCE_DEVICE_NAME:?} not found; retrying in {:.2}s",
                 retry_delay.as_secs_f32()
@@ -150,9 +165,11 @@ fn run(terminate: Arc<AtomicBool>) -> io::Result<()> {
         );
         source.set_nonblocking(true)?;
         retry_delay = RETRY_MIN;
+        let mut lid_source: Option<(std::path::PathBuf, Device)> = None;
+        let mut next_lid_discovery = Instant::now();
 
         'connected: while !terminate.load(Ordering::Relaxed) {
-            match source.fetch_events() {
+            let source_idle = match source.fetch_events() {
                 Ok(events) => {
                     for event in events {
                         match filter.observe(is_prog2_press(&event), started.elapsed()) {
@@ -173,10 +190,9 @@ fn run(terminate: Arc<AtomicBool>) -> io::Result<()> {
                             FilterResult::Unrelated => {}
                         }
                     }
+                    false
                 }
-                Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
-                    wait_interruptibly(&terminate, POLL_INTERVAL);
-                }
+                Err(error) if error.kind() == io::ErrorKind::WouldBlock => true,
                 Err(error) => {
                     eprintln!(
                         "source device {} disconnected or failed: {error}; rediscovering",
@@ -186,6 +202,69 @@ fn run(terminate: Arc<AtomicBool>) -> io::Result<()> {
                     retry_delay = (retry_delay * 2).min(RETRY_MAX);
                     break 'connected;
                 }
+            };
+
+            if lid_source.is_none() && Instant::now() >= next_lid_discovery {
+                match discover_device(LID_DEVICE_NAME) {
+                    Some((lid_path, lid)) => match lid.set_nonblocking(true) {
+                        Ok(()) => {
+                            eprintln!(
+                                "selected recovery device: {} ({LID_DEVICE_NAME})",
+                                lid_path.display()
+                            );
+                            lid_source = Some((lid_path, lid));
+                        }
+                        Err(error) => {
+                            eprintln!(
+                                "could not use recovery device {}: {error}; retrying",
+                                lid_path.display()
+                            );
+                            next_lid_discovery = Instant::now() + RETRY_MAX;
+                        }
+                    },
+                    None => {
+                        eprintln!(
+                            "recovery device {LID_DEVICE_NAME:?} not found; retrying in {:.2}s",
+                            RETRY_MAX.as_secs_f32()
+                        );
+                        next_lid_discovery = Instant::now() + RETRY_MAX;
+                    }
+                }
+            }
+
+            let mut failed_lid = None;
+            if let Some((lid_path, lid)) = lid_source.as_mut() {
+                match lid.fetch_events() {
+                    Ok(events) => {
+                        for event in events {
+                            if is_lid_open(&event) {
+                                if filter.recover_laptop_mode() {
+                                    emit_mode(&mut virtual_device, Mode::Laptop)?;
+                                    eprintln!(
+                                        "lid opened: recovered laptop mode (SW_TABLET_MODE=0)"
+                                    );
+                                } else {
+                                    eprintln!("lid opened: laptop mode already active");
+                                }
+                            }
+                        }
+                    }
+                    Err(error) if error.kind() == io::ErrorKind::WouldBlock => {}
+                    Err(error) => failed_lid = Some((lid_path.clone(), error)),
+                }
+            }
+
+            if let Some((lid_path, error)) = failed_lid {
+                eprintln!(
+                    "recovery device {} disconnected or failed: {error}; rediscovering",
+                    lid_path.display()
+                );
+                lid_source = None;
+                next_lid_discovery = Instant::now() + RETRY_MIN;
+            }
+
+            if source_idle {
+                wait_interruptibly(&terminate, POLL_INTERVAL);
             }
         }
     }
@@ -247,5 +326,45 @@ mod tests {
             FilterResult::Unrelated
         );
         assert_eq!(filter.mode, Mode::Laptop);
+    }
+
+    #[test]
+    fn lid_open_recovers_laptop_mode() {
+        let mut filter = filter();
+        filter.observe(true, Duration::ZERO);
+
+        assert!(filter.recover_laptop_mode());
+        assert_eq!(filter.mode, Mode::Laptop);
+    }
+
+    #[test]
+    fn lid_open_clears_hinge_debounce() {
+        let mut filter = filter();
+        filter.observe(true, Duration::ZERO);
+        filter.recover_laptop_mode();
+
+        assert_eq!(
+            filter.observe(true, Duration::from_millis(50)),
+            FilterResult::Transition(Mode::Tablet)
+        );
+    }
+
+    #[test]
+    fn lid_open_in_laptop_mode_needs_no_transition() {
+        let mut filter = filter();
+        assert!(!filter.recover_laptop_mode());
+        assert_eq!(filter.mode, Mode::Laptop);
+    }
+
+    #[test]
+    fn lid_open_switch_event_is_recognized() {
+        let event = SwitchEvent::new(SwitchCode::SW_LID, 0).into();
+        assert!(is_lid_open(&event));
+    }
+
+    #[test]
+    fn lid_close_switch_event_is_not_a_recovery() {
+        let event = SwitchEvent::new(SwitchCode::SW_LID, 1).into();
+        assert!(!is_lid_open(&event));
     }
 }

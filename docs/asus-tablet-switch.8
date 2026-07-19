@@ -1,0 +1,58 @@
+.TH ASUS-TABLET-SWITCH 8 "July 2026" "asus-tablet-switch 0.1.0" "System Administration"
+.SH NAME
+asus-tablet-switch \- translate an ASUS hinge hotkey into tablet-mode state
+.SH SYNOPSIS
+.B asus-tablet-switch
+.SH DESCRIPTION
+.B asus-tablet-switch
+is a hardware-specific compatibility daemon for the ASUS ProArt PX13
+HN7306EAC. It reads
+.B KEY_PROG2
+events from the evdev device named
+.BR "Asus WMI hotkeys" ,
+debounces the observed duplicate burst, and emits an alternating
+.B SW_TABLET_MODE
+state through a uinput device.
+.PP
+The daemon does not accept command-line options. Diagnostic messages are
+written to standard error and are captured by the systemd journal when run as
+a service.
+.SH RECOVERY
+A real closed-to-open event from the evdev device named
+.B Lid Switch
+forces laptop mode and clears the hinge debounce state. If the built-in
+keyboard and touchpad remain disabled after unfolding, close the lid fully and
+reopen it.
+.SH LIMITATIONS
+The observed hinge event is a relative toggle, not an absolute position. The
+daemon assumes laptop mode when it starts. Starting it while folded, restarting
+it while folded, or losing an event can invert the state until a full
+lid-close/open recovery or restart.
+.PP
+This program can cause the desktop to disable the built-in keyboard and
+touchpad. Test it interactively on verified hardware before enabling the
+service.
+.SH SIGNALS
+.B SIGINT
+and
+.B SIGTERM
+request a clean shutdown.
+.SH FILES
+.TP
+.I /usr/lib/systemd/system/asus-tablet-switch.service
+System service definition.
+.TP
+.I /usr/lib/udev/rules.d/99-asus-tablet-switch.rules
+Narrow device-access rules for the service account.
+.TP
+.I /usr/lib/modules-load.d/asus-tablet-switch.conf
+Requests the uinput kernel module at boot.
+.SH SEE ALSO
+.BR evtest (1),
+.BR libinput (1),
+.BR systemd.service (5),
+.BR systemd-sysusers (8)
+.PP
+Project documentation and detailed diagnostic notes:
+.UR https://github.com/geoff-hill/asus-tablet-switch
+.UE

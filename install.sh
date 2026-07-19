@@ -25,7 +25,8 @@ sudo udevadm control --reload-rules
 sudo udevadm trigger --subsystem-match=input --action=change
 sudo udevadm trigger --subsystem-match=misc --action=change
 sudo systemctl daemon-reload
-sudo systemctl enable --now asus-tablet-switch.service
+sudo systemctl enable asus-tablet-switch.service
+sudo systemctl restart asus-tablet-switch.service
 
 sudo systemctl status asus-tablet-switch.service --no-pager || true
 sudo journalctl -u asus-tablet-switch.service -b --no-pager
